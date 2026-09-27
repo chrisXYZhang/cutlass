@@ -57,6 +57,8 @@ build_cutlass() {
 @echo off
 call \"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat\"
 set PATH=%PATH%;C:\Program Files\CMake\bin
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1
+set PATH=%PATH%;%CUDA_PATH%\bin
 cd /d $REMOTE_DIR
 if not exist build mkdir build
 cd build
