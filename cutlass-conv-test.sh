@@ -45,31 +45,20 @@ sync_repo() {
   git push origin "$BRANCH" --quiet
 
   # Clone or pull on remote Windows machine
-  $SSH "if exist $REMOTE_DIR\.git ( \
-          cd /d $REMOTE_DIR && git fetch origin && git checkout $BRANCH && git reset --hard origin/$BRANCH \
-        ) else ( \
-          git clone --branch $BRANCH $FORK_URL $REMOTE_DIR \
-        )"
+  $SSH "cmd /c \"if exist $REMOTE_DIR\.git ( cd /d $REMOTE_DIR && git fetch origin && git checkout $BRANCH && git reset --hard origin/$BRANCH ) else ( git clone --branch $BRANCH $FORK_URL $REMOTE_DIR )\""
 
   echo "=== Sync complete ==="
 }
 
 build_cutlass() {
   echo "=== Building $TARGET on $REMOTE_HOST... ==="
-  $SSH "$VCVARS && cd /d $REMOTE_DIR && if not exist build mkdir build && cd build && \
-    cmake .. -G \"Visual Studio 17 2022\" \
-      -DCUTLASS_NVCC_ARCHS=90a \
-      -DCUTLASS_ENABLE_EXAMPLES=ON \
-      -DCUTLASS_ENABLE_TESTS=OFF && \
-    cmake --build . --target $TARGET --config Release -j"
+  $SSH "cmd /c \"$VCVARS && cd /d $REMOTE_DIR && if not exist build mkdir build && cd build && cmake .. -G \\\"Visual Studio 17 2022\\\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF && cmake --build . --target $TARGET --config Release -j\""
   echo "=== Build complete ==="
 }
 
 run_example() {
   echo "=== Running $TARGET on $REMOTE_HOST... ==="
-  $SSH "cd /d $REMOTE_DIR/build && \
-    nvidia-smi && echo. && \
-    examples\\cute\\tutorial\\hopper\\Release\\$TARGET.exe"
+  $SSH "cmd /c \"cd /d $REMOTE_DIR\build && nvidia-smi && echo. && examples\cute\tutorial\hopper\Release\\$TARGET.exe\""
   echo "=== Run complete ==="
 }
 
