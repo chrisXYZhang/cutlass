@@ -126,24 +126,31 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
     // Both TMAs are TiledCopy objects — use get_slice/partition_S/partition_D
     auto block_tma_a = tma_a.get_slice(0);
-    Tensor tAgA = block_tma_a.partition_S(gA);                              // (TMA,TMA_M,TMA_K,k)
-    Tensor tAsA = block_tma_a.partition_D(sA);                              // (TMA,TMA_M,TMA_K,PIPE)
+    auto tAgA_x = block_tma_a.partition_S(gA);                              // (TMA,TMA_M,TMA_K,k)
+    auto tAsA_x = block_tma_a.partition_D(sA);                              // (TMA,TMA_M,TMA_K,PIPE)
 
     auto block_tma_b = tma_b.get_slice(0);
-    Tensor tBgB = block_tma_b.partition_S(gB);                              // (TMA,TMA_N,TMA_K,k)
-    Tensor tBsB = block_tma_b.partition_D(sB);                              // (TMA,TMA_N,TMA_K,PIPE)
+    auto tBgB_x = block_tma_b.partition_S(gB);                              // (TMA,TMA_N,TMA_K,k)
+    auto tBsB_x = block_tma_b.partition_D(sB);                              // (TMA,TMA_N,TMA_K,PIPE)
 
-    constexpr int tma_transaction_bytes = (size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) * sizeof(TA))
-                                        + (size<0>(SmemLayoutB{}) * size<1>(SmemLayoutB{}) * sizeof(TB));
+    // Group the TMA sub-modes together so each TMA issue is a single element in mode-0
+    // For gA: (TMA,TMA_M,TMA_K,k) -> keep mode-0 as TMA, group middle modes, keep last
+    Tensor tAgA = group_modes<1, rank(tAgA_x) - 1>(tAgA_x);                // (TMA,TMA_REST,k)
+    Tensor tAsA = group_modes<1, rank(tAsA_x) - 1>(tAsA_x);                // (TMA,TMA_REST,PIPE)
+    Tensor tBgB = group_modes<1, rank(tBgB_x) - 1>(tBgB_x);                // (TMA,TMA_REST,k)
+    Tensor tBsB = group_modes<1, rank(tBsB_x) - 1>(tBsB_x);                // (TMA,TMA_REST,PIPE)
+
+    constexpr int tma_transaction_bytes = sizeof(make_tensor_like(tAsA(_,_,Int<0>{})))
+                                        + sizeof(make_tensor_like(tBsB(_,_,Int<0>{})));
 
     //
     // PREFETCH
     //
 
-    auto K_PIPE_MAX = size<3>(tAsA);  // PIPE dimension (4D: TMA,TMA_M,TMA_K,PIPE)
+    auto K_PIPE_MAX = size<2>(tAsA);  // PIPE dimension (3D: TMA,TMA_REST,PIPE)
 
     // Total count of tiles
-    int k_tile_count = size<3>(tAgA);  // k dimension (4D: TMA,TMA_M,TMA_K,k)
+    int k_tile_count = size<2>(tAgA);  // k dimension (3D: TMA,TMA_REST,k)
     // Current tile index in gmem to read from
     int k_tile = 0;
 
@@ -173,8 +180,8 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     {
         // Set expected Tx Bytes after each reset / init
         ProducerBarType::arrive_and_expect_tx(&producer_mbar[pipe], tma_transaction_bytes);
-        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,_,k_tile), tAsA(_,_,_,pipe));
-        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,_,_,k_tile), tBsB(_,_,_,pipe));
+        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,k_tile), tAsA(_,_,pipe));
+        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,_,k_tile), tBsB(_,_,pipe));
     }
     --k_tile_count;
     ++k_tile;
@@ -245,8 +252,8 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
         ConsumerBarType::wait(&consumer_mbar[pipe], write_state.phase());
         // Set expected Tx Bytes after each reset / init
         ProducerBarType::arrive_and_expect_tx(&producer_mbar[pipe], tma_transaction_bytes);
-        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,_,k_tile), tAsA(_,_,_,pipe));
-        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,_,_,k_tile), tBsB(_,_,_,pipe));
+        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,k_tile), tAsA(_,_,pipe));
+        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,_,k_tile), tBsB(_,_,pipe));
         ++write_state;
     }
     --k_tile_count;
