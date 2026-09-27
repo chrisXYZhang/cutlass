@@ -63,7 +63,7 @@ set PATH=%PATH%;%CUDA_PATH%\bin;C:\Users\chrisz\python312
 cd /d $REMOTE_DIR
 if not exist build mkdir build
 cd build
-cmake .. -G \"Visual Studio 17 2022\" -DCMAKE_CUDA_COMPILER=\"%CUDA_PATH%/bin/nvcc.exe\" -DCUDAToolkit_ROOT=\"%CUDA_PATH%\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF
+cmake .. -G \"Visual Studio 17 2022\" -DCMAKE_CUDA_COMPILER=\"%CUDA_PATH%/bin/nvcc.exe\" -DCUDAToolkit_ROOT=\"%CUDA_PATH%\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF -DCUTLASS_ENABLE_TOOLS=OFF -DCUTLASS_ENABLE_LIBRARY=OFF
 cmake --build . --target $TARGET --config Release -j
 '@"
 
