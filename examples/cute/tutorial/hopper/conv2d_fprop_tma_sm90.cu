@@ -36,6 +36,7 @@
 #include <thrust/device_vector.h>
 
 #include <cute/tensor.hpp>
+#include <cute/atom/copy_traits_sm90_im2col.hpp>
 
 #include "cutlass/cluster_launch.hpp"
 #include "cutlass/arch/barrier.h"
@@ -293,7 +294,7 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     auto sW = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TW>{}, make_shape(bN,bK,bP));
 
     // Define the MMA
-    TiledMMA tiled_mma = make_tiles_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
+    TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
 
     // Define the TMAs
     // Create Global memory tensors for TMA inspection
