@@ -59,7 +59,7 @@ call \"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\B
 set PATH=%PATH%;C:\Program Files\CMake\bin
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1
 set CudaToolkitDir=%CUDA_PATH%
-set PATH=%PATH%;%CUDA_PATH%\bin
+set PATH=%PATH%;%CUDA_PATH%\bin;C:\Users\chrisz\python312
 cd /d $REMOTE_DIR
 if not exist build mkdir build
 cd build
