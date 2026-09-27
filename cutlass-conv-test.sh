@@ -45,7 +45,7 @@ sync_repo() {
   git push origin "$BRANCH" --quiet
 
   # Clone or pull on remote Windows machine (PowerShell)
-  $SSH "if (Test-Path $REMOTE_DIR/.git) { cd $REMOTE_DIR; git fetch origin; git checkout $BRANCH; git reset --hard origin/$BRANCH } else { git clone --branch $BRANCH $FORK_URL $REMOTE_DIR }"
+  $SSH "\$env:Path += ';C:\Program Files\Git\cmd'; if (Test-Path $REMOTE_DIR/.git) { cd $REMOTE_DIR; git fetch origin; git checkout $BRANCH; git reset --hard origin/$BRANCH } else { git clone --branch $BRANCH $FORK_URL $REMOTE_DIR }"
 
   echo "=== Sync complete ==="
 }
