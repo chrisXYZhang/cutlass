@@ -44,21 +44,33 @@ sync_repo() {
   echo "  Pushing $BRANCH to origin..."
   git push origin "$BRANCH" --quiet
 
-  # Clone or pull on remote Windows machine
-  $SSH "cmd /c \"if exist $REMOTE_DIR\.git ( cd /d $REMOTE_DIR && git fetch origin && git checkout $BRANCH && git reset --hard origin/$BRANCH ) else ( git clone --branch $BRANCH $FORK_URL $REMOTE_DIR )\""
+  # Clone or pull on remote Windows machine (PowerShell)
+  $SSH "if (Test-Path $REMOTE_DIR/.git) { cd $REMOTE_DIR; git fetch origin; git checkout $BRANCH; git reset --hard origin/$BRANCH } else { git clone --branch $BRANCH $FORK_URL $REMOTE_DIR }"
 
   echo "=== Sync complete ==="
 }
 
 build_cutlass() {
+  echo "=== Creating build script on $REMOTE_HOST... ==="
+  # Write a batch file on the remote machine, then execute it
+  $SSH "Set-Content -Path $REMOTE_DIR/build_conv.bat -Value @'
+@echo off
+call \"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat\"
+cd /d $REMOTE_DIR
+if not exist build mkdir build
+cd build
+cmake .. -G \"Visual Studio 17 2022\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF
+cmake --build . --target $TARGET --config Release -j
+'@"
+
   echo "=== Building $TARGET on $REMOTE_HOST... ==="
-  $SSH "cmd /c \"$VCVARS && cd /d $REMOTE_DIR && if not exist build mkdir build && cd build && cmake .. -G \\\"Visual Studio 17 2022\\\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF && cmake --build . --target $TARGET --config Release -j\""
+  $SSH "cmd /c $REMOTE_DIR/build_conv.bat"
   echo "=== Build complete ==="
 }
 
 run_example() {
   echo "=== Running $TARGET on $REMOTE_HOST... ==="
-  $SSH "cmd /c \"cd /d $REMOTE_DIR\build && nvidia-smi && echo. && examples\cute\tutorial\hopper\Release\\$TARGET.exe\""
+  $SSH "cd $REMOTE_DIR/build; nvidia-smi; ./examples/cute/tutorial/hopper/Release/$TARGET.exe"
   echo "=== Run complete ==="
 }
 
