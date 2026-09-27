@@ -58,11 +58,12 @@ build_cutlass() {
 call \"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat\"
 set PATH=%PATH%;C:\Program Files\CMake\bin
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1
+set CudaToolkitDir=%CUDA_PATH%
 set PATH=%PATH%;%CUDA_PATH%\bin
 cd /d $REMOTE_DIR
 if not exist build mkdir build
 cd build
-cmake .. -G \"Visual Studio 17 2022\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF
+cmake .. -G \"Visual Studio 17 2022\" -DCMAKE_CUDA_COMPILER=\"%CUDA_PATH%/bin/nvcc.exe\" -DCUDAToolkit_ROOT=\"%CUDA_PATH%\" -DCUTLASS_NVCC_ARCHS=90a -DCUTLASS_ENABLE_EXAMPLES=ON -DCUTLASS_ENABLE_TESTS=OFF
 cmake --build . --target $TARGET --config Release -j
 '@"
 
