@@ -56,6 +56,7 @@ build_cutlass() {
   $SSH "Set-Content -Path $REMOTE_DIR/build_conv.bat -Value @'
 @echo off
 call \"C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat\"
+set PATH=%PATH%;C:\Program Files\CMake\bin
 cd /d $REMOTE_DIR
 if not exist build mkdir build
 cd build
