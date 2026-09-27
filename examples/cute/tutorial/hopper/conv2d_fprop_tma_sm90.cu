@@ -124,14 +124,14 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     //   partition_D partitions the destination (smem) tensor according to the TMA atom.
     //
 
-    // Im2col TMA (A): use get_slice/partition_S/partition_D
+    // Both TMAs are TiledCopy objects — use get_slice/partition_S/partition_D
     auto block_tma_a = tma_a.get_slice(0);
     Tensor tAgA = block_tma_a.partition_S(gA);                              // (TMA,TMA_M,TMA_K,k)
     Tensor tAsA = block_tma_a.partition_D(sA);                              // (TMA,TMA_M,TMA_K,PIPE)
 
-    // Standard TMA (B): use tma_partition/group_modes (same as GEMM tutorial)
-    auto [tBgB, tBsB] = tma_partition(tma_b, Int<0>{}, Layout<_1>{},
-                                      group_modes<0,2>(sB), group_modes<0,2>(gB));  // (TMA,k) and (TMA,PIPE)
+    auto block_tma_b = tma_b.get_slice(0);
+    Tensor tBgB = block_tma_b.partition_S(gB);                              // (TMA,TMA_N,TMA_K,k)
+    Tensor tBsB = block_tma_b.partition_D(sB);                              // (TMA,TMA_N,TMA_K,PIPE)
 
     constexpr int tma_transaction_bytes = (size<0>(SmemLayoutA{}) * size<1>(SmemLayoutA{}) * sizeof(TA))
                                         + (size<0>(SmemLayoutB{}) * size<1>(SmemLayoutB{}) * sizeof(TB));
@@ -140,10 +140,10 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     // PREFETCH
     //
 
-    auto K_PIPE_MAX = size<1>(tBsB);  // PIPE dimension from B (2D: TMA,PIPE)
+    auto K_PIPE_MAX = size<3>(tAsA);  // PIPE dimension (4D: TMA,TMA_M,TMA_K,PIPE)
 
     // Total count of tiles
-    int k_tile_count = size<1>(tBgB);  // k dimension from B (2D: TMA,k)
+    int k_tile_count = size<3>(tAgA);  // k dimension (4D: TMA,TMA_M,TMA_K,k)
     // Current tile index in gmem to read from
     int k_tile = 0;
 
@@ -173,8 +173,8 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
     {
         // Set expected Tx Bytes after each reset / init
         ProducerBarType::arrive_and_expect_tx(&producer_mbar[pipe], tma_transaction_bytes);
-        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,_,k_tile), tAsA(_,_,_,pipe));  // im2col: 4D
-        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,k_tile), tBsB(_,pipe));          // standard: 2D
+        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,_,k_tile), tAsA(_,_,_,pipe));
+        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,_,_,k_tile), tBsB(_,_,_,pipe));
     }
     --k_tile_count;
     ++k_tile;
@@ -245,8 +245,8 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
         ConsumerBarType::wait(&consumer_mbar[pipe], write_state.phase());
         // Set expected Tx Bytes after each reset / init
         ProducerBarType::arrive_and_expect_tx(&producer_mbar[pipe], tma_transaction_bytes);
-        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,_,k_tile), tAsA(_,_,_,pipe));  // im2col: 4D
-        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,k_tile), tBsB(_,pipe));          // standard: 2D
+        copy(tma_a.with(producer_mbar[pipe]), tAgA(_,_,_,k_tile), tAsA(_,_,_,pipe));
+        copy(tma_b.with(producer_mbar[pipe]), tBgB(_,_,_,k_tile), tBsB(_,_,_,pipe));
         ++write_state;
     }
     --k_tile_count;
@@ -320,20 +320,20 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     // dilation
     auto dilation_srt = make_tuple(1, 1); // dilation=1
 
-    // Create TMA Atoms with the desired copy operation on the source and destination
-    Copy_Atom tmaA = make_im2col_tma_copy(SM90_TMA_LOAD_IM2COL{},
-                                          mA,
-                                          sA(_,_,0), 
-                                          product_each(shape(sA(_,_,0))),
-                                          Int<1>{},
-                                          lower_corner_whd,
-                                          upper_corner_whd,
-                                          lower_padding_whd,
-                                          upper_padding_whd,
-                                          stride_whd,
-                                          lower_srt,
-                                          dilation_srt);
-    Copy_Atom tmaW = make_tma_atom(SM90_TMA_LOAD{}, mW, sW(_,_,0), make_shape(bN,bK));
+    // Create TMA TiledCopy objects (not Copy_Atom — we need get_slice/partition_S/partition_D)
+    auto tmaA = make_im2col_tma_copy(SM90_TMA_LOAD_IM2COL{},
+                                     mA,
+                                     sA(_,_,0),
+                                     product_each(shape(sA(_,_,0))),
+                                     Int<1>{},
+                                     lower_corner_whd,
+                                     upper_corner_whd,
+                                     lower_padding_whd,
+                                     upper_padding_whd,
+                                     stride_whd,
+                                     lower_srt,
+                                     dilation_srt);
+    auto tmaW = make_tma_copy(SM90_TMA_LOAD{}, mW, sW(_,_,0), make_shape(bN,bK), Int<1>{});
 
     //
     // Setup and Launch
