@@ -289,7 +289,9 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     auto prob_shape = make_shape(M, N, K);
 
     // Define strides (mixed)
-    auto dA = make_stride(Int<1>{}, c, c*w, c*w*h);
+    // Activation tensor must be rank-2 hierarchical ((W,H,N), C) for make_im2col_tma_copy.
+    // product_each on rank-2 shape gives (W*H*N, C), which aligns with the rank-2 cta_tiler (bM, bK).
+    auto dA = make_stride(make_stride(c, c*w, c*w*h), Int<1>{});
     auto dW = make_stride(r*s*c, make_stride(Int<1>{}, c, c*s));
     auto dO = make_stride(N, Int<1>{});
 
@@ -309,8 +311,8 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
 
     // Define the TMAs
     // Create Global memory tensors for TMA inspection
-    Tensor mA = make_tensor(make_gmem_ptr(A), 
-                            make_shape(c,w,h,n), 
+    Tensor mA = make_tensor(make_gmem_ptr(A),
+                            make_shape(make_shape(w,h,n), c),
                             dA);
     Tensor mW = make_tensor(make_gmem_ptr(W),
                             make_shape(k, make_shape(c,s,r)),
