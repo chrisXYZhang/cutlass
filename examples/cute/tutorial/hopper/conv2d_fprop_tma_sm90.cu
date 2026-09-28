@@ -28,6 +28,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************************************/
+// Force __grid_constant__ so MSVC host stub accepts aligned kernel params
+#define CUTLASS_GRID_CONSTANT __grid_constant__
+
 #include <cstdlib>
 #include <cstdio>
 #include <cassert>
