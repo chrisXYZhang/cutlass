@@ -68,15 +68,42 @@ template <class ProblemShape, class CtaTiler,
           class TB, class SmemLayoutB, class TmaB,
           class TC, class CStride, class TiledMma,
           class Alpha, class Beta>
+struct KernelParams
+{
+    ProblemShape shape_MNK;
+    CtaTiler cta_tiler;
+    TA const* A;
+    TmaA tma_a;
+    TB const* B;
+    TmaB tma_b;
+    TC* C;
+    CStride dC;
+    TiledMma mma;
+    Alpha alpha;
+    Beta beta;
+};
+
+template <class ProblemShape, class CtaTiler,
+          class TA, class SmemLayoutA, class TmaA,
+          class TB, class SmemLayoutB, class TmaB,
+          class TC, class CStride, class TiledMma,
+          class Alpha, class Beta>
 __global__ static
 __launch_bounds__(decltype(size(TiledMma{}))::value)
 void
-gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
-            TA const* A, CUTLASS_GRID_CONSTANT TmaA const tma_a,
-            TB const* B, CUTLASS_GRID_CONSTANT TmaB const tma_b,
-            TC      * C, CStride dC, TiledMma mma,
-            Alpha alpha, Beta beta)
+gemm_device(CUTLASS_GRID_CONSTANT KernelParams<ProblemShape, CtaTiler,
+            TA, SmemLayoutA, TmaA, TB, SmemLayoutB, TmaB,
+            TC, CStride, TiledMma, Alpha, Beta> const params)
 {
+    auto const& shape_MNK  = params.shape_MNK;
+    auto const& cta_tiler  = params.cta_tiler;
+    auto const& tma_a      = params.tma_a;
+    auto const& tma_b      = params.tma_b;
+    auto        C          = params.C;
+    auto const& dC         = params.dC;
+    auto        mma        = params.mma;
+    auto const& alpha      = params.alpha;
+    auto const& beta       = params.beta;
     // Preconditions
     CUTE_STATIC_ASSERT_V(rank(shape_MNK) == Int<3>{});                   // (M, N, K)
     CUTE_STATIC_ASSERT_V(rank(cta_tiler) == Int<3>{});                   // (BLK_M, BLK_N, BLK_K)
@@ -365,9 +392,16 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     TI alpha = TI(1.0f);
     TI beta  = TI(0.0f);
 
+    using KParams = KernelParams<decltype(prob_shape), decltype(cta_tiler),
+                                 TA, decltype(sA), decltype(tmaA),
+                                 TW, decltype(sW), decltype(tmaW),
+                                 TO, decltype(dO), decltype(tiled_mma),
+                                 decltype(alpha), decltype(beta)>;
+    KParams kernel_args{prob_shape, cta_tiler, A, tmaA, W, tmaW, O, dO, tiled_mma, alpha, beta};
+
     void const* kernel_ptr = reinterpret_cast<void const*>(
                                 &gemm_device<decltype(prob_shape), decltype(cta_tiler),
-                                             TA, decltype(sA), decltype(tmaA), 
+                                             TA, decltype(sA), decltype(tmaA),
                                              TW, decltype(sW), decltype(tmaW),
                                              TO, decltype(dO), decltype(tiled_mma),
                                              decltype(alpha), decltype(beta)>);
@@ -378,11 +412,7 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
 
     // Kernel Launch
     cutlass::Status status = cutlass::launch_kernel_on_cluster(params, kernel_ptr,
-                                                               prob_shape, cta_tiler,
-                                                               A, tmaA,
-                                                               W, tmaW,
-                                                               O, dO, tiled_mma, 
-                                                               alpha, beta);
+                                                               kernel_args);
     CUTE_CHECK_LAST();
 
     if (status != cutlass::Status::kSuccess) {
