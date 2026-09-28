@@ -74,7 +74,7 @@ cmake --build . --target $TARGET --config Release -j
 
 run_example() {
   echo "=== Running $TARGET on $REMOTE_HOST... ==="
-  $SSH "cd $REMOTE_DIR/build; nvidia-smi; ./examples/cute/tutorial/hopper/Release/$TARGET.exe"
+  $SSH "cd $REMOTE_DIR/build; nvidia-smi; \$env:CUDA_VISIBLE_DEVICES='1'; ./examples/cute/tutorial/hopper/Release/$TARGET.exe"
   echo "=== Run complete ==="
 }
 
