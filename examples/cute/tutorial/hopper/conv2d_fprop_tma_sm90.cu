@@ -28,9 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************************************/
-// Force __grid_constant__ so MSVC host stub accepts aligned kernel params
-#define CUTLASS_GRID_CONSTANT __grid_constant__
-
 #include <cstdlib>
 #include <cstdio>
 #include <cassert>
@@ -94,10 +91,11 @@ template <class ProblemShape, class CtaTiler,
 __global__ static
 __launch_bounds__(decltype(size(TiledMma{}))::value)
 void
-gemm_device(CUTLASS_GRID_CONSTANT KernelParams<ProblemShape, CtaTiler,
+gemm_device(KernelParams<ProblemShape, CtaTiler,
             TA, SmemLayoutA, TmaA, TB, SmemLayoutB, TmaB,
-            TC, CStride, TiledMma, Alpha, Beta> const params)
+            TC, CStride, TiledMma, Alpha, Beta> const* params_ptr)
 {
+    auto const& params     = *params_ptr;
     auto const& shape_MNK  = params.shape_MNK;
     auto const& cta_tiler  = params.cta_tiler;
     auto const& tma_a      = params.tma_a;
@@ -400,7 +398,11 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
                                  TW, decltype(sW), decltype(tmaW),
                                  TO, decltype(dO), decltype(tiled_mma),
                                  decltype(alpha), decltype(beta)>;
-    KParams kernel_args{prob_shape, cta_tiler, A, tmaA, W, tmaW, O, dO, tiled_mma, alpha, beta};
+    KParams h_kernel_args{prob_shape, cta_tiler, A, tmaA, W, tmaW, O, dO, tiled_mma, alpha, beta};
+
+    KParams* d_kernel_args = nullptr;
+    CUTE_CHECK_ERROR(cudaMalloc(&d_kernel_args, sizeof(KParams)));
+    CUTE_CHECK_ERROR(cudaMemcpy(d_kernel_args, &h_kernel_args, sizeof(KParams), cudaMemcpyHostToDevice));
 
     void const* kernel_ptr = reinterpret_cast<void const*>(
                                 &gemm_device<decltype(prob_shape), decltype(cta_tiler),
@@ -415,12 +417,14 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
 
     // Kernel Launch
     cutlass::Status status = cutlass::launch_kernel_on_cluster(params, kernel_ptr,
-                                                               kernel_args);
+                                                               d_kernel_args);
     CUTE_CHECK_LAST();
 
     if (status != cutlass::Status::kSuccess) {
         std::cerr << "Error: Failed at kernel launch" << std::endl;
     }
+
+    CUTE_CHECK_ERROR(cudaFree(d_kernel_args));
 }
 
 int main(int argc, char** argv)
