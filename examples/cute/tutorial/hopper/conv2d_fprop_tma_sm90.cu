@@ -86,8 +86,8 @@ gemm_device(ProblemShape shape_MNK, CtaTiler cta_tiler,
 
     CUTE_STATIC_ASSERT_V(size<0>(SmemLayoutA{}) == size<0>(cta_tiler));  // BLK_M
     CUTE_STATIC_ASSERT_V(size<0>(SmemLayoutB{}) == size<1>(cta_tiler));  // BLK_N
-    CUTE_STATIC_ASSERT_V(size<1>(SmemLayoutA{}) == size<2>(cta_tiler));  // BLK_K
-    CUTE_STATIC_ASSERT_V(size<1>(SmemLayoutB{}) == size<2>(cta_tiler));  // BLK_K
+    CUTE_STATIC_ASSERT_V(size<1>(SmemLayoutA{}) == size(get<2>(cta_tiler)));  // BLK_K (hierarchical)
+    CUTE_STATIC_ASSERT_V(size<1>(SmemLayoutB{}) == size(get<2>(cta_tiler)));  // BLK_K (hierarchical)
 
     CUTE_STATIC_ASSERT_V(congruent(select<0,1>(shape_MNK), dC));         // dC strides for shape MN
 
@@ -273,24 +273,31 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
 {
     // Implicit conversion convolution to GEMM
     // from O(n,p,q,k) = A(n,h,w,c) * W(k,r,s,c)
-    // to O(M,N) = A(M,K) * W(N,K) where M = n*p*q, K = r*s*c, N=k
-    
+    // to O(M,N) = A(M,K) * W(N,K) where M = n*p*q, K = (c,s,r), N=k
+    //
+    // TUTORIAL:
+    //   For im2col TMA, K must be a hierarchical tuple (C,S,R) — not a flat product c*s*r.
+    //   The TMA im2col coordinate tensor has ComposedLayout with shape (M, (C,S,R)).
+    //   The CTA tiler's K dimension must be Shape<bK> (rank-1 tuple) so that logical_divide
+    //   tiles only the C (channel) dimension, leaving S and R as outer k-loop modes.
+    //   This matches how the CUTLASS conv collective handles fprop im2col.
+
     // Define shapes (dynamic)
     auto M = int(n*p*q);
-    auto K = int(r*s*c);
+    auto K = make_shape(c, s, r);
     auto N = int(k);
     auto prob_shape = make_shape(M, N, K);
 
-    // Define TN strides (mixed)
+    // Define strides (mixed)
     auto dA = make_stride(Int<1>{}, c, c*w, c*w*h);
-    auto dW = make_stride(r*s*c, s*c, c, Int<1>{});
+    auto dW = make_stride(r*s*c, make_stride(Int<1>{}, c, c*s));
     auto dO = make_stride(N, Int<1>{});
 
     // Define CTA tile sizes (static)
     auto bM = Int<128>{};
     auto bN = Int<128>{};
     auto bK = Int<64>{};
-    auto cta_tiler = make_shape(bM, bN, bK);
+    auto cta_tiler = make_shape(bM, bN, make_shape(bK));
     auto bP = Int<3>{}; // Pipeline
 
     // Define the smem layouts (static)
@@ -305,8 +312,8 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     Tensor mA = make_tensor(make_gmem_ptr(A), 
                             make_shape(c,w,h,n), 
                             dA);
-    Tensor mW = make_tensor(make_gmem_ptr(W), 
-                            make_shape(k,r,s,c),
+    Tensor mW = make_tensor(make_gmem_ptr(W),
+                            make_shape(k, make_shape(c,s,r)),
                             dW);
 
     // Compute convolution corners (for fprop, stride=1, no padding, dilation=1)
@@ -337,7 +344,7 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
                                      stride_whd,
                                      lower_srt,
                                      dilation_srt);
-    auto tmaW = make_tma_copy(SM90_TMA_LOAD{}, mW, sW(_,_,0), make_shape(bN,bK), Int<1>{});
+    auto tmaW = make_tma_copy(SM90_TMA_LOAD{}, mW, sW(_,_,0), make_shape(bN, make_shape(bK)), Int<1>{});
 
     //
     // Setup and Launch
@@ -346,7 +353,7 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     // Launch parameter setup
     int smem_size = int(sizeof(SharedStorage<TA, TW, decltype(sA), decltype(sW)>));
     dim3 dimBlock(size(tiled_mma));
-    dim3 dimCluster(2, 1, 1);
+    dim3 dimCluster(1, 1, 1);
     dim3 dimGrid(round_up(size(ceil_div(M, bM)), dimCluster.x),
                  round_up(size(ceil_div(N, bN)), dimCluster.y));
     cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smem_size};
@@ -400,23 +407,23 @@ int main(int argc, char** argv)
 
 #if defined(CUTLASS_ARCH_MMA_SM90_SUPPORTED)
 
-    int N = 100;
+    int N = 1;
     if (argc >= 2)
         sscanf(argv[1], "%d", &N);
 
-    int H = 512;
+    int H = 56;
     if (argc >= 3)
         sscanf(argv[2], "%d", &H);
 
-    int W = 256;
+    int W = 56;
     if (argc >= 4)
         sscanf(argv[3], "%d", &W);
 
-    int C = 10;
+    int C = 64;
     if (argc >= 5)
         sscanf(argv[4], "%d", &C);
 
-    int K = 1;
+    int K = 128;
     if (argc >= 6)
         sscanf(argv[5], "%d", &K);
 
@@ -446,7 +453,7 @@ int main(int argc, char** argv)
     thrust::device_vector<TW> d_W = h_W;
     thrust::device_vector<TO> d_O = h_O;
 
-    double gflops = (2.0*N*H*W*C*K*R*S) * 1e-9;
+    double gflops = (2.0*N*P*Q*K*C*R*S) * 1e-9;
 
     const int timing_iterations = 100;
     GPU_Clock timer;
