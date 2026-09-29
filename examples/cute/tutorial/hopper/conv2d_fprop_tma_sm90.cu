@@ -331,11 +331,15 @@ conv2d_fprop(int n, int h, int w, int c, int k, int r, int s, int p, int q,
     auto bP = Int<3>{}; // Pipeline
 
     // Define the smem layouts (static)
-    auto sA = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
-    auto sW = tile_to_shape(GMMA::Layout_MN_SW128_Atom<TW>{}, make_shape(bN,bK,bP));
+    // For fprop, both A and B use K-major smem layout.
+    // K-major is required for im2col TMA so that basis_get maps the contiguous
+    // smem dimension to the channel (C) mode, producing correct CWHDN ordering
+    // in the TMA descriptor.
+    auto sA = tile_to_shape(GMMA::Layout_K_SW128_Atom<TA>{}, make_shape(bM,bK,bP));
+    auto sW = tile_to_shape(GMMA::Layout_K_SW128_Atom<TW>{}, make_shape(bN,bK,bP));
 
     // Define the MMA
-    TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::MN,GMMA::Major::MN>{});
+    TiledMMA tiled_mma = make_tiled_mma(SM90_64x64x16_F16F16F16_SS<GMMA::Major::K,GMMA::Major::K>{});
 
     // Define the TMAs
     // Create Global memory tensors for TMA inspection
